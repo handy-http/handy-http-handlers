@@ -6,7 +6,7 @@
 	"dependencies": {
 		"handy-http-primitives": "~>1.8",
 		"path-matcher": "~>1.2.0",
-		"slf4d": "~>4.1.1"
+		"slf4d": "~>4.0"
 	},
 	"description": "Library for some common, handy request handlers that you're likely to need in web projects.",
 	"license": "CC0",
