@@ -205,6 +205,35 @@ class PathHandler : HttpRequestHandler {
     }
 
     /**
+     * Adds mappings to this path handler which correspond to functions defined
+     * in the given symbol which have been annotated with the `@PathMapping`
+     * attribute.
+     */
+    void registerHandlers(alias symbol)() {
+        static assert(
+            __traits(isModule, symbol),
+            "PathHandler.registerHandlers can only be called with a module."
+        );
+        import std.conv: to;
+        HttpRequestHandler handlerRef;
+        static foreach (i, mem; __traits(allMembers, symbol)) {
+            static if (isValidHandlerRegistrationTarget!(__traits(getMember, symbol, mem))) {
+                mixin("alias target" ~ i.to!string ~ " = __traits(getMember, symbol, mem);");
+                static foreach (attr; __traits(getAttributes, mixin("target" ~ i.to!string))) {
+                    static if (is(typeof(attr) == PathMapping)) {
+                        debugF!"Registered handler: %s -> %s"(
+                            attr,
+                            __traits(fullyQualifiedName, mixin("target" ~ i.to!string))
+                        );
+                        handlerRef = HttpRequestHandler.of(mixin("&target" ~ i.to!string));
+                        this.addMapping(attr.method, attr.pattern, handlerRef);
+                    }
+                }
+            }
+        }
+    }
+
+    /**
      * Finds the handler to use to handle a given request, using our list of
      * pre-configured mappings.
      * Params:
@@ -232,6 +261,40 @@ class PathHandler : HttpRequestHandler {
         }
         debugF!("No handler found for %s %s.")(request.method, request.url);
         return null;
+    }
+}
+
+/**
+ * A user-defined attribute that, when added to a function, allows that
+ * function to be registered automatically by a path handler when you call
+ * its `registerHandlers` method on the module containing the function.
+ */
+struct PathMapping {
+    /**
+     * The HTTP method that the mapping accepts.
+     */
+    HttpMethod method;
+    /**
+     * The path pattern for the mapping.
+     */
+    string pattern;
+}
+
+private bool isValidHandlerRegistrationTarget(alias symbol)() {
+    import std.traits;
+    static if (isFunction!(symbol)) {
+        alias params = Parameters!(symbol);
+        static if (params.length == 2) {
+            alias paramStorageClasses = ParameterStorageClassTuple!(symbol);
+            return is(params[0] == ServerHttpRequest) && is(params[1] == ServerHttpResponse) &&
+            paramStorageClasses[0] == ParameterStorageClass.ref_ &&
+            paramStorageClasses[1] == ParameterStorageClass.ref_ &&
+            is(ReturnType!(symbol) == void);
+        } else {
+            return false;
+        }
+    } else {
+        return false;
     }
 }
 
@@ -295,4 +358,41 @@ unittest {
     assert(result8.response.status == HttpStatus.NOT_FOUND);
     auto result9 = generateHandledData(HttpMethod.POST, "/api/do-something");
     assert(result9.response.status == HttpStatus.OK);
+}
+
+// Test registerHandlers
+unittest {
+    import handy_http_handlers.path_handler_sample_module;
+
+    class C {}
+
+    PathHandler ph = new PathHandler();
+    ph.registerHandlers!(handy_http_handlers.path_handler_sample_module);
+    
+    // Verify that the handlers defined in the module were actually added.
+    ServerHttpRequest req1 = ServerHttpRequestBuilder()
+        .withMethod("GET")
+        .withUrl("/h1")
+        .build();
+    ServerHttpResponse resp1 = ServerHttpResponseBuilder().build();
+    ph.handle(req1, resp1);
+    assert(resp1.status == HttpStatus.OK);
+
+    ServerHttpRequest req2 = ServerHttpRequestBuilder()
+        .withMethod("POST")
+        .withUrl("/h2")
+        .build();
+    ServerHttpResponse resp2 = ServerHttpResponseBuilder().build();
+    ph.handle(req2, resp2);
+    assert(resp2.status == HttpStatus.OK);
+
+    // Verify that other stuff returns a 404.
+    ServerHttpRequest req3 = ServerHttpRequestBuilder()
+        .withMethod("GET")
+        .withUrl("/h2")
+        .build();
+    ServerHttpResponse resp3 = ServerHttpResponseBuilder().build();
+    ph.handle(req3, resp3);
+    assert(resp3.status == HttpStatus.NOT_FOUND);
+
 }
