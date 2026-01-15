@@ -19,4 +19,9 @@ void h2(ref ServerHttpRequest request, ref ServerHttpResponse response) {
     response.status = HttpStatus.OK;
 }
 
+@GetMapping("/h3")
+void h3(ref ServerHttpRequest request, ref ServerHttpResponse response) {
+    response.status = HttpStatus.OK;
+}
+
 }

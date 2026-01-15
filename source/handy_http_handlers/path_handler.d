@@ -207,7 +207,7 @@ class PathHandler : HttpRequestHandler {
     /**
      * Adds mappings to this path handler which correspond to functions defined
      * in the given symbol which have been annotated with the `@PathMapping`
-     * attribute.
+     * attribute (or any simplified aliases like `@GetMapping`).
      */
     void registerHandlers(alias symbol)() {
         static assert(
@@ -216,17 +216,40 @@ class PathHandler : HttpRequestHandler {
         );
         import std.conv: to;
         HttpRequestHandler handlerRef;
+        PathMapping pathMapping;
+        bool foundMappingAttribute;
         static foreach (i, mem; __traits(allMembers, symbol)) {
             static if (isValidHandlerRegistrationTarget!(__traits(getMember, symbol, mem))) {
+                // The symbol is a valid handler function, so iterate over its
+                // attributes to find a @PathMapping or similar, and if present,
+                // register the handler.
                 mixin("alias target" ~ i.to!string ~ " = __traits(getMember, symbol, mem);");
+                foundMappingAttribute = true;
                 static foreach (attr; __traits(getAttributes, mixin("target" ~ i.to!string))) {
+                    // Check if the attribute is one of the possible "Mapping" struct types.
                     static if (is(typeof(attr) == PathMapping)) {
-                        debugF!"Registered handler: %s -> %s"(
-                            attr,
+                        pathMapping = attr;
+                    } else static if (is(typeof(attr) == GetMapping)) {
+                        pathMapping = PathMapping(HttpMethod.GET, attr.pattern);
+                    } else static if (is(typeof(attr) == PostMapping)) {
+                        pathMapping = PathMapping(HttpMethod.POST, attr.pattern);
+                    } else static if (is(typeof(attr) == PutMapping)) {
+                        pathMapping = PathMapping(HttpMethod.PUT, attr.pattern);
+                    } else static if (is(typeof(attr) == DeleteMapping)) {
+                        pathMapping = PathMapping(HttpMethod.DELETE, attr.pattern);
+                    } else static if (is(typeof(attr) == PatchMapping)) {
+                        pathMapping = PathMapping(HttpMethod.PATCH, attr.pattern);
+                    } else {
+                        foundMappingAttribute = false;
+                    }
+                    if (foundMappingAttribute) {
+                        debugF!"Registered handler: %s %s -> %s"(
+                            pathMapping.method,
+                            pathMapping.pattern,
                             __traits(fullyQualifiedName, mixin("target" ~ i.to!string))
                         );
                         handlerRef = HttpRequestHandler.of(mixin("&target" ~ i.to!string));
-                        this.addMapping(attr.method, attr.pattern, handlerRef);
+                        this.addMapping(pathMapping.method, pathMapping.pattern, handlerRef);
                     }
                 }
             }
@@ -280,6 +303,61 @@ struct PathMapping {
     string pattern;
 }
 
+/**
+ * A simplified version of `PathMapping` for HTTP GET mappings only.
+ */
+struct GetMapping {
+    /**
+     * See `PathMapping.pattern`.
+     */
+    string pattern;
+}
+
+/**
+ * A simplified version of `PathMapping` for HTTP POST mappings only.
+ */
+struct PostMapping {
+    /**
+     * See `PathMapping.pattern`.
+     */
+    string pattern;
+}
+
+/**
+ * A simplified version of `PathMapping` for HTTP PUT mappings only.
+ */
+struct PutMapping {
+    /**
+     * See `PathMapping.pattern`.
+     */
+    string pattern;
+}
+
+/**
+ * A simplified version of `PathMapping` for HTTP DELETE mappings only.
+ */
+struct DeleteMapping {
+    /**
+     * See `PathMapping.pattern`.
+     */
+    string pattern;
+}
+
+/**
+ * A simplified version of `PathMapping` for HTTP PATCH mappings only.
+ */
+struct PatchMapping {
+    /**
+     * See `PathMapping.pattern`.
+     */
+    string pattern;
+}
+
+/**
+ * Determines if a symbol refers to a function that can be used as a request
+ * handler at compile time.
+ * Returns: True if the symbol refers to a valid request handler function.
+ */
 private bool isValidHandlerRegistrationTarget(alias symbol)() {
     import std.traits;
     static if (isFunction!(symbol)) {
@@ -386,13 +464,21 @@ unittest {
     ph.handle(req2, resp2);
     assert(resp2.status == HttpStatus.OK);
 
-    // Verify that other stuff returns a 404.
     ServerHttpRequest req3 = ServerHttpRequestBuilder()
         .withMethod("GET")
-        .withUrl("/h2")
+        .withUrl("/h3")
         .build();
     ServerHttpResponse resp3 = ServerHttpResponseBuilder().build();
     ph.handle(req3, resp3);
-    assert(resp3.status == HttpStatus.NOT_FOUND);
+    assert(resp3.status == HttpStatus.OK);
+
+    // Verify that other stuff returns a 404.
+    ServerHttpRequest req4 = ServerHttpRequestBuilder()
+        .withMethod("GET")
+        .withUrl("/h2")
+        .build();
+    ServerHttpResponse resp4 = ServerHttpResponseBuilder().build();
+    ph.handle(req4, resp4);
+    assert(resp4.status == HttpStatus.NOT_FOUND);
 
 }
