@@ -104,6 +104,31 @@ T getPathParamAs(T)(in ServerHttpRequest request, string name, T defaultValue = 
 }
 
 /**
+ * Gets the specified path parameter as the given type T, or throws a NOT FOUND
+ * status exception otherwise.
+ * Params:
+ *   request = The request to get the path variable from.
+ *   name = The name of the path variable.
+ * Returns: The path variable that was found.
+ */
+T getPathParamOrThrow(T)(in ServerHttpRequest request, string name) {
+    import std.conv : ConvException;
+    foreach (p; getPathParams(request)) {
+        if (p.name == name) {
+            try {
+                return p.getAs!T;
+            } catch (ConvException e) {
+                // Skip and throw at the end if no params match.
+            }
+        }
+    }
+    throw new HttpStatusException(
+        HttpStatus.NOT_FOUND,
+        "Missing required path parameter \"" ~ name ~ "\"."
+    );
+}
+
+/**
  * A request handler that maps incoming requests to a particular handler based
  * on the request's URL path and/or HTTP method (GET, POST, etc.).
  *
